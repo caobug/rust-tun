@@ -80,7 +80,8 @@ impl Device {
                 mtu: adapter.get_mtu()? as u16,
             };
 
-            // This is not needed since we use netsh to set the address.
+            // This is not needed because address/route configuration for this
+            // code path is applied above via WinAPI/helper calls.
             // device.configure(config)?;
 
             Ok(device)
