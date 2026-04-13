@@ -328,7 +328,7 @@ fn netmask_to_prefix_len(mask: Ipv4Addr) -> u8 {
 
 fn set_unicast_address(luid: u64, address: Ipv4Addr, mask: Ipv4Addr) -> io::Result<()> {
     use windows_sys::Win32::NetworkManagement::IpHelper::{
-        CreateUnicastIpAddressEntry, MIB_UNICASTIPADDRESS_ROW,
+        CreateUnicastIpAddressEntry, DeleteUnicastIpAddressEntry, MIB_UNICASTIPADDRESS_ROW,
     };
     use windows_sys::Win32::NetworkManagement::Ndis::NET_LUID_LH;
     use windows_sys::Win32::Networking::WinSock::AF_INET;
@@ -345,6 +345,8 @@ fn set_unicast_address(luid: u64, address: Ipv4Addr, mask: Ipv4Addr) -> io::Resu
         row.PreferredLifetime = u32::MAX;
         row.PrefixOrigin = 1; // IpPrefixOriginManual
         row.SuffixOrigin = 1; // IpSuffixOriginManual
+
+        DeleteUnicastIpAddressEntry(&row);
 
         let status = CreateUnicastIpAddressEntry(&row);
         if status == 0 {
@@ -373,6 +375,8 @@ fn set_default_route(luid: u64, gateway: Ipv4Addr) -> io::Result<()> {
         row.NextHop.Ipv4.sin_addr.S_un.S_addr = u32::from_ne_bytes(gateway.octets());
         row.Metric = 0;
         row.Protocol = 3; // MIB_IPPROTO_NETMGMT
+        row.ValidLifetime = u32::MAX;
+        row.PreferredLifetime = u32::MAX;
 
         DeleteIpForwardEntry2(&row);
 
