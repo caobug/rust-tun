@@ -47,16 +47,17 @@ impl Device {
                 }
             };
             if let (Some(address), Some(mask)) = (config.address, config.netmask) {
+                let gateway = config.destination;
                 let luid_value = unsafe { adapter.get_luid().Value };
                 match (address, mask) {
                     (IpAddr::V4(addr), IpAddr::V4(mask_v4)) => {
                         set_unicast_address(luid_value, addr, mask_v4)?;
-                        if let Some(IpAddr::V4(gw)) = config.destination {
+                        if let Some(IpAddr::V4(gw)) = gateway {
                             set_default_route(luid_value, gw)?;
                         }
                     }
                     _ => {
-                        adapter.set_network_addresses_tuple(address, mask, config.destination)?;
+                        adapter.set_network_addresses_tuple(address, mask, gateway)?;
                     }
                 }
             }
@@ -78,6 +79,9 @@ impl Device {
                 tun: Tun { session },
                 mtu: adapter.get_mtu()? as u16,
             };
+
+            // This is not needed since we use netsh to set the address.
+            // device.configure(config)?;
 
             Ok(device)
         } else if layer == Layer::L2 {
