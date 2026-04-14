@@ -323,7 +323,14 @@ impl Write for Writer {
 }
 
 fn netmask_to_prefix_len(mask: Ipv4Addr) -> u8 {
-    u32::from(mask).leading_ones() as u8
+    let bits = u32::from(mask);
+    let prefix = bits.leading_ones() as u8;
+    debug_assert_eq!(
+        bits,
+        u32::MAX.checked_shl(32 - prefix as u32).unwrap_or(0),
+        "non-contiguous netmask"
+    );
+    prefix
 }
 
 fn set_unicast_address(luid: u64, address: Ipv4Addr, mask: Ipv4Addr) -> io::Result<()> {
@@ -346,7 +353,12 @@ fn set_unicast_address(luid: u64, address: Ipv4Addr, mask: Ipv4Addr) -> io::Resu
         row.PrefixOrigin = 1; // IpPrefixOriginManual
         row.SuffixOrigin = 1; // IpSuffixOriginManual
 
-        DeleteUnicastIpAddressEntry(&row);
+        let del_status = DeleteUnicastIpAddressEntry(&row);
+        if del_status != 0 && del_status != 2
+        /* ERROR_NOT_FOUND */
+        {
+            log::warn!("DeleteUnicastIpAddressEntry failed: {del_status}");
+        }
 
         let status = CreateUnicastIpAddressEntry(&row);
         if status == 0 {
@@ -369,6 +381,7 @@ fn set_default_route(luid: u64, gateway: Ipv4Addr) -> io::Result<()> {
         let mut row: MIB_IPFORWARD_ROW2 = std::mem::zeroed();
         row.InterfaceLuid = NET_LUID_LH { Value: luid };
         row.DestinationPrefix.Prefix.si_family = AF_INET;
+        row.DestinationPrefix.Prefix.Ipv4.sin_family = AF_INET;
         row.DestinationPrefix.PrefixLength = 0;
         row.NextHop.si_family = AF_INET;
         row.NextHop.Ipv4.sin_family = AF_INET;
@@ -378,7 +391,12 @@ fn set_default_route(luid: u64, gateway: Ipv4Addr) -> io::Result<()> {
         row.ValidLifetime = u32::MAX;
         row.PreferredLifetime = u32::MAX;
 
-        DeleteIpForwardEntry2(&row);
+        let del_status = DeleteIpForwardEntry2(&row);
+        if del_status != 0 && del_status != 2
+        /* ERROR_NOT_FOUND */
+        {
+            log::warn!("DeleteIpForwardEntry2 failed: {del_status}");
+        }
 
         let status = CreateIpForwardEntry2(&row);
         if status != 0 {
