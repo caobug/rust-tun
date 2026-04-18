@@ -16,6 +16,7 @@ use std::io::{self, Read, Write};
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 
+use super::dns::set_dns_servers;
 use crate::Layer;
 use crate::configuration::Configuration;
 use crate::device::AbstractDevice;
@@ -68,7 +69,7 @@ impl Device {
                 set_interface_metric(luid, metric.into(), true)?;
             }
             if let Some(dns_servers) = &config.platform_config.dns_servers {
-                adapter.set_dns_servers(dns_servers)?;
+                set_dns_servers(adapter.get_guid(), tun_name, dns_servers)?;
             }
             if let Some(mtu) = config.mtu {
                 adapter.set_mtu(mtu as _)?;
