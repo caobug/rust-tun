@@ -21,7 +21,10 @@ use crate::configuration::Configuration;
 use crate::device::AbstractDevice;
 use crate::error::{Error, Result};
 use crate::windows::AbstractDeviceExt;
-use windows_sys::Win32::NetworkManagement::IpHelper::SetIpInterfaceEntry;
+use windows_sys::Win32::Foundation::{ERROR_NOT_FOUND, NO_ERROR};
+use windows_sys::Win32::NetworkManagement::IpHelper::{
+    InitializeUnicastIpAddressEntry, SetIpInterfaceEntry,
+};
 use wintun_bindings::{Adapter, MAX_RING_CAPACITY, Session, load_from_path};
 
 /// A TUN device using the wintun driver.
@@ -341,32 +344,40 @@ fn set_unicast_address(luid: u64, address: Ipv4Addr, mask: Ipv4Addr) -> io::Resu
     use windows_sys::Win32::Networking::WinSock::AF_INET;
 
     unsafe {
-        let mut row: MIB_UNICASTIPADDRESS_ROW = std::mem::zeroed();
-        row.InterfaceLuid = NET_LUID_LH { Value: luid };
-        row.Address.si_family = AF_INET;
-        row.Address.Ipv4.sin_family = AF_INET;
-        row.Address.Ipv4.sin_addr.S_un.S_addr = u32::from_ne_bytes(address.octets());
-        row.OnLinkPrefixLength = netmask_to_prefix_len(mask);
-        row.DadState = 4; // IpDadStatePreferred
-        row.ValidLifetime = u32::MAX;
-        row.PreferredLifetime = u32::MAX;
-        row.PrefixOrigin = 1; // IpPrefixOriginManual
-        row.SuffixOrigin = 1; // IpSuffixOriginManual
+        // For deletion: use minimal row with only Address + Interface identifier
+        let mut del_row: MIB_UNICASTIPADDRESS_ROW = std::mem::zeroed();
+        del_row.InterfaceLuid = NET_LUID_LH { Value: luid };
+        del_row.Address.si_family = AF_INET;
+        del_row.Address.Ipv4.sin_family = AF_INET;
+        del_row.Address.Ipv4.sin_addr.S_un.S_addr = u32::from_ne_bytes(address.octets());
 
-        let del_status = DeleteUnicastIpAddressEntry(&row);
-        if del_status != 0 && del_status != 2
-        /* ERROR_NOT_FOUND */
-        {
+        let del_status = DeleteUnicastIpAddressEntry(&del_row);
+        if del_status != NO_ERROR && del_status != ERROR_NOT_FOUND {
             log::warn!("DeleteUnicastIpAddressEntry failed: {del_status}");
         }
 
-        let status = CreateUnicastIpAddressEntry(&row);
-        if status == 0 {
-            return Ok(());
+        // For creation: initialize with defaults, then set required fields
+        let mut create_row: MIB_UNICASTIPADDRESS_ROW = std::mem::zeroed();
+        InitializeUnicastIpAddressEntry(&mut create_row);
+
+        create_row.InterfaceLuid = NET_LUID_LH { Value: luid };
+        create_row.Address.si_family = AF_INET;
+        create_row.Address.Ipv4.sin_family = AF_INET;
+        create_row.Address.Ipv4.sin_addr.S_un.S_addr = u32::from_ne_bytes(address.octets());
+        create_row.OnLinkPrefixLength = netmask_to_prefix_len(mask);
+        create_row.DadState = 4; // IpDadStatePreferred
+        create_row.ValidLifetime = u32::MAX;
+        create_row.PreferredLifetime = u32::MAX;
+        create_row.PrefixOrigin = 1; // IpPrefixOriginManual
+        create_row.SuffixOrigin = 1; // IpSuffixOriginManual
+
+        let status = CreateUnicastIpAddressEntry(&create_row);
+        if status != NO_ERROR {
+            log::error!("CreateUnicastIpAddressEntry failed: {status}");
+            return Err(io::Error::from_raw_os_error(status as i32));
         }
 
-        log::error!("CreateUnicastIpAddressEntry failed: {status}");
-        Err(io::Error::from_raw_os_error(status as i32))
+        Ok(())
     }
 }
 
@@ -392,14 +403,12 @@ fn set_default_route(luid: u64, gateway: Ipv4Addr) -> io::Result<()> {
         row.PreferredLifetime = u32::MAX;
 
         let del_status = DeleteIpForwardEntry2(&row);
-        if del_status != 0 && del_status != 2
-        /* ERROR_NOT_FOUND */
-        {
+        if del_status != NO_ERROR && del_status != ERROR_NOT_FOUND {
             log::warn!("DeleteIpForwardEntry2 failed: {del_status}");
         }
 
         let status = CreateIpForwardEntry2(&row);
-        if status != 0 {
+        if status != NO_ERROR {
             log::error!("CreateIpForwardEntry2 failed: {status}");
             return Err(io::Error::from_raw_os_error(status as i32));
         }
@@ -426,7 +435,7 @@ fn set_interface_metric(luid: u64, metric: u32, ipv6: bool) -> io::Result<()> {
 
     // SAFETY: `row` is initialized and has luid set
     let status = unsafe { GetIpInterfaceEntry(&mut row) };
-    if status != 0 {
+    if status != NO_ERROR {
         log::error!("GetIpInterfaceEntry failed with error: {status}");
         return Err(io::Error::from_raw_os_error(status as i32));
     }
@@ -438,7 +447,7 @@ fn set_interface_metric(luid: u64, metric: u32, ipv6: bool) -> io::Result<()> {
 
     // SAFETY: `row` is initialized and has luid set
     let status = unsafe { SetIpInterfaceEntry(&mut row) };
-    if status != 0 {
+    if status != NO_ERROR {
         log::error!("SetIpInterfaceEntry failed with error: {status}");
         return Err(io::Error::from_raw_os_error(status as i32));
     }
