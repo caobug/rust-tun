@@ -338,22 +338,32 @@ fn netmask_to_prefix_len(mask: Ipv4Addr) -> u8 {
 
 fn set_unicast_address(luid: u64, address: Ipv4Addr, mask: Ipv4Addr) -> io::Result<()> {
     use windows_sys::Win32::NetworkManagement::IpHelper::{
-        CreateUnicastIpAddressEntry, DeleteUnicastIpAddressEntry, MIB_UNICASTIPADDRESS_ROW,
+        CreateUnicastIpAddressEntry, DeleteUnicastIpAddressEntry, GetUnicastIpAddressEntry,
+        MIB_UNICASTIPADDRESS_ROW,
     };
     use windows_sys::Win32::NetworkManagement::Ndis::NET_LUID_LH;
     use windows_sys::Win32::Networking::WinSock::AF_INET;
 
     unsafe {
         // For deletion: use minimal row with only Address + Interface identifier
-        let mut del_row: MIB_UNICASTIPADDRESS_ROW = std::mem::zeroed();
-        del_row.InterfaceLuid = NET_LUID_LH { Value: luid };
-        del_row.Address.si_family = AF_INET;
-        del_row.Address.Ipv4.sin_family = AF_INET;
-        del_row.Address.Ipv4.sin_addr.S_un.S_addr = u32::from_ne_bytes(address.octets());
+        let mut probe_row: MIB_UNICASTIPADDRESS_ROW = std::mem::zeroed();
+        InitializeUnicastIpAddressEntry(&mut probe_row);
+        probe_row.InterfaceLuid = NET_LUID_LH { Value: luid };
+        probe_row.Address.si_family = AF_INET;
+        probe_row.Address.Ipv4.sin_family = AF_INET;
+        probe_row.Address.Ipv4.sin_addr.S_un.S_addr = u32::from_ne_bytes(address.octets());
 
-        let del_status = DeleteUnicastIpAddressEntry(&del_row);
-        if del_status != NO_ERROR && del_status != ERROR_NOT_FOUND {
-            log::warn!("DeleteUnicastIpAddressEntry failed: {del_status}");
+        match GetUnicastIpAddressEntry(&mut probe_row) {
+            NO_ERROR => {
+                let del_status = DeleteUnicastIpAddressEntry(&probe_row);
+                if del_status != NO_ERROR {
+                    log::warn!("DeleteUnicastIpAddressEntry failed: {del_status}");
+                }
+            }
+            ERROR_NOT_FOUND => {}
+            status => {
+                log::warn!("GetUnicastIpAddressEntry probe failed: {status}");
+            }
         }
 
         // For creation: initialize with defaults, then set required fields
