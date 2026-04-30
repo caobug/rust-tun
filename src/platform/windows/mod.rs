@@ -15,6 +15,7 @@
 //! Windows specific functionality.
 
 mod device;
+mod dns;
 
 use crate::error::Result;
 use crate::{AbstractDevice, configuration::Configuration};
